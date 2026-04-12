@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assemblyai-transcribe"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "Small CLI for uploading local audio to AssemblyAI and printing transcripts."
 readme = "README.md"
 requires-python = ">=2"
@@ -20,6 +20,9 @@ classifiers = [
 dependencies = [
   "typing; python_version < '3.5'"
 ]
+
+[project.scripts]
+assemblyai_transcribe = "assemblyai_transcribe:main"
 
 [project.urls]
 Homepage = "https://github.com/jifengwu2k/assemblyai_transcribe"

@@ -11,25 +11,26 @@ Install from PyPI:
 ```bash
 pip install assemblyai-transcribe
 ```
+After installation, run it as `assemblyai_transcribe`.
 
 ## Usage
 
-Run the module directly:
+Run the installed command directly:
 
 ```bash
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY
 ```
 
 Examples:
 
 ```bash
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --eu
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --model universal-3-pro
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --model universal-3-pro --model universal-2
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --language-detection
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --speaker-labels
-python -m assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY > transcript.txt
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --eu
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --model universal-3-pro
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --model universal-3-pro --model universal-2
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --language-detection
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY --speaker-labels
+assemblyai_transcribe ./example.mp3 --api-key YOUR_API_KEY > transcript.txt
 ```
 
 Arguments:
@@ -47,7 +48,7 @@ Arguments:
 Help:
 
 ```bash
-python -m assemblyai_transcribe --help
+assemblyai_transcribe --help
 ```
 
 ## Contributing
