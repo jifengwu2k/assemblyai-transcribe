@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assemblyai-transcribe"
-version = "0.1.0a1"
-description = "Small CLI for uploading local audio to AssemblyAI and printing transcripts."
+version = "0.1.0a2"
+description = "Small CLI for uploading local audio to AssemblyAI and printing or saving transcripts."
 readme = "README.md"
 requires-python = ">=2"
 license = "MIT"

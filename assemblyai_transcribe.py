@@ -4,12 +4,13 @@
 """AssemblyAI CLI using only the Python standard library.
 
 Run with:
-    python -m assemblyai_transcribe AUDIO_FILE --api-key YOUR_API_KEY
+    python -m assemblyai_transcribe AUDIO_FILE --api-key YOUR_API_KEY -o transcript.txt
 """
 
 from __future__ import print_function
 
 import argparse
+import io
 import json
 import sys
 import time
@@ -40,7 +41,7 @@ def eprint(message):
 def build_parser():
     # type: () -> argparse.ArgumentParser
     parser = argparse.ArgumentParser(
-        description="Upload a local audio file to AssemblyAI and print the transcript.",
+        description="Upload a local audio file to AssemblyAI and save the transcript.",
     )
     parser.add_argument("audio_file", help="Path to the local audio file")
     parser.add_argument(
@@ -74,35 +75,29 @@ def build_parser():
     )
     parser.add_argument(
         "--language-detection",
-        "--language_detection",
         dest="language_detection",
         action="store_true",
         help="Enable automatic language detection",
     )
     parser.add_argument(
         "--poll-interval",
-        default="3.0",
+        type=float,
+        default=3.0,
         help="Seconds between polling attempts (default: 3.0)",
     )
     parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="Write the transcript to a file",
+    )
+    parser.add_argument(
         "--timeout",
-        default="30.0",
+        type=float,
+        default=30.0,
         help="HTTPS connection timeout in seconds (default: 30.0)",
     )
     return parser
-
-
-def parse_positive_float_argument(parser, option_name, option_value):
-    # type: (argparse.ArgumentParser, str, str) -> float
-    try:
-        parsed_value = float(option_value)
-    except ValueError:
-        parser.error("%s must be a number: %s" % (option_name, option_value))
-
-    if parsed_value <= 0.0:
-        parser.error("%s must be greater than 0: %s" % (option_name, option_value))
-
-    return parsed_value
 
 
 def parse_args(argv=None):
@@ -110,10 +105,6 @@ def parse_args(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     args.models = args.models or list(DEFAULT_SPEECH_MODELS)
-    args.poll_interval = parse_positive_float_argument(
-        parser, "--poll-interval", args.poll_interval
-    )
-    args.timeout = parse_positive_float_argument(parser, "--timeout", args.timeout)
     return args
 
 
@@ -268,6 +259,32 @@ def poll_transcript(transcript_id, base_url, api_key, poll_interval, timeout):
         time.sleep(poll_interval)
 
 
+def format_transcript_output(transcript, speaker_labels):
+    # type: (Dict[str, Any], bool) -> str
+    if speaker_labels:
+        utterances = transcript.get("utterances") or []
+        lines = []
+        for utterance in utterances:
+            speaker = utterance.get("speaker", "?")
+            text = utterance.get("text", "")
+            lines.append("Speaker %s: %s" % (speaker, text))
+        return "\n".join(lines)
+
+    return transcript.get("text", "")
+
+
+
+def write_output_text(output_text, output_path):
+    # type: (str, str) -> None
+    try:
+        with io.open(output_path, "w", encoding="utf-8") as output_file:
+            output_file.write(output_text)
+            output_file.write(u"\n")
+    except (IOError, OSError) as exc:
+        raise AssemblyAIError("Cannot write output file %s: %s" % (output_path, exc))
+
+
+
 def run_transcribe(args):
     # type: (argparse.Namespace) -> int
     base_url = EU_BASE_URL if args.eu else args.base_url
@@ -299,14 +316,9 @@ def run_transcribe(args):
             timeout=args.timeout,
         )
 
-        if args.speaker_labels:
-            utterances = transcript.get("utterances") or []
-            for utterance in utterances:
-                speaker = utterance.get("speaker", "?")
-                text = utterance.get("text", "")
-                print("Speaker %s: %s" % (speaker, text))
-        else:
-            print(transcript.get("text", ""))
+        output_text = format_transcript_output(transcript, args.speaker_labels)
+        write_output_text(output_text, args.output)
+        eprint("Wrote transcript to: %s" % args.output)
 
         return 0
     except AssemblyAIError as exc:
