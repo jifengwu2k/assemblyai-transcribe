@@ -4,7 +4,7 @@
 """AssemblyAI CLI using only the Python standard library.
 
 Run with:
-    python -m assemblyai_transcribe AUDIO_FILE --api-key YOUR_API_KEY -o transcript.txt
+    python -m assemblyai_transcribe AUDIO_FILE [AUDIO_FILE ...] --api-key YOUR_API_KEY -o transcript.txt
 """
 
 from __future__ import print_function
@@ -12,6 +12,7 @@ from __future__ import print_function
 import argparse
 import io
 import json
+import os
 import sys
 import time
 
@@ -41,9 +42,9 @@ def eprint(message):
 def build_parser():
     # type: () -> argparse.ArgumentParser
     parser = argparse.ArgumentParser(
-        description="Upload a local audio file to AssemblyAI and save the transcript.",
+        description="Upload local audio file(s) to AssemblyAI and save the transcript(s).",
     )
-    parser.add_argument("audio_file", help="Path to the local audio file")
+    parser.add_argument("audio_files", nargs="+", help="Path(s) to local audio file(s)")
     parser.add_argument(
         "--api-key",
         required=True,
@@ -69,15 +70,18 @@ def build_parser():
         ) % ", ".join(DEFAULT_SPEECH_MODELS),
     )
     parser.add_argument(
-        "--speaker-labels",
-        action="store_true",
-        help="Enable speaker diarization and print utterances",
+        "--no-speaker-labels",
+        action="store_false",
+        dest="speaker_labels",
+        default=True,
+        help="Disable speaker diarization (enabled by default)",
     )
     parser.add_argument(
-        "--language-detection",
+        "--no-language-detection",
         dest="language_detection",
-        action="store_true",
-        help="Enable automatic language detection",
+        action="store_false",
+        default=True,
+        help="Disable automatic language detection (enabled by default)",
     )
     parser.add_argument(
         "--poll-interval",
@@ -88,14 +92,13 @@ def build_parser():
     parser.add_argument(
         "-o",
         "--output",
-        required=True,
-        help="Write the transcript to a file",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=30.0,
-        help="HTTPS connection timeout in seconds (default: 30.0)",
+        default=None,
+        help=(
+            "Write transcript(s). With one input file, this is the output path "
+            "(default: AUDIO_FILE.txt). With multiple input files, this is a "
+            "directory (created if needed); each transcript is saved as "
+            "BASENAME.txt inside it."
+        ),
     )
     return parser
 
@@ -108,8 +111,8 @@ def parse_args(argv=None):
     return args
 
 
-def make_json_request(method, url, api_key, payload=None, timeout=30.0):
-    # type: (str, str, str, Optional[Dict[str, Any]], float) -> Dict[str, Any]
+def make_json_request(method, url, api_key, payload=None, timeout=None):
+    # type: (str, str, str, Optional[Dict[str, Any]], Optional[float]) -> Dict[str, Any]
     parsed = urlparse(url)
     path = parsed.path or "/"
     if parsed.query:
@@ -165,8 +168,8 @@ def parse_json_response(response):
     return data
 
 
-def upload_file(audio_path, base_url, api_key, timeout):
-    # type: (str, str, str, float) -> str
+def upload_file(audio_path, base_url, api_key, timeout=None):
+    # type: (str, str, str, Optional[float]) -> str
     parsed = urlparse(base_url)
     upload_path = "/v2/upload"
 
@@ -218,9 +221,9 @@ def submit_transcription(
     speech_models,
     speaker_labels,
     language_detection,
-    timeout,
+    timeout=None,
 ):
-    # type: (str, str, str, List[str], bool, bool, float) -> str
+    # type: (str, str, str, List[str], bool, bool, Optional[float]) -> str
     payload = {
         "audio_url": audio_url,
         "speech_models": speech_models,
@@ -243,8 +246,8 @@ def submit_transcription(
     return transcript_id
 
 
-def poll_transcript(transcript_id, base_url, api_key, poll_interval, timeout):
-    # type: (str, str, str, float, float) -> Dict[str, Any]
+def poll_transcript(transcript_id, base_url, api_key, poll_interval, timeout=None):
+    # type: (str, str, str, float, Optional[float]) -> Dict[str, Any]
     polling_url = "%s/v2/transcript/%s" % (base_url, transcript_id)
     while True:
         data = make_json_request("GET", polling_url, api_key, timeout=timeout)
@@ -285,40 +288,77 @@ def write_output_text(output_text, output_path):
 
 
 
+def output_path(input_file, output_arg):
+    # type: (str, Optional[str]) -> str
+    """Determine output file path for a single input file."""
+    if output_arg is None:
+        return input_file + ".txt"
+    if os.path.isdir(output_arg):
+        base = os.path.splitext(os.path.basename(input_file))[0]
+        return os.path.join(output_arg, base + ".txt")
+    return output_arg
+
+
+def ensure_dir_for_file(file_path):
+    # type: (str) -> None
+    """Create parent directories for *file_path* if they don't exist."""
+    parent = os.path.dirname(file_path)
+    if parent and not os.path.isdir(parent):
+        try:
+            os.makedirs(parent)
+        except (IOError, OSError) as exc:
+            raise AssemblyAIError(
+                "Cannot create output directory %s: %s" % (parent, exc)
+            )
+
+
 def run_transcribe(args):
     # type: (argparse.Namespace) -> int
     base_url = EU_BASE_URL if args.eu else args.base_url
+    audio_files = args.audio_files  # type: List[str]
+
+    # When --output is given with multiple files, treat it as a directory
+    # and create it if it doesn't exist.
+    if args.output is not None and len(audio_files) > 1:
+        if not os.path.isdir(args.output):
+            try:
+                os.makedirs(args.output)
+            except (IOError, OSError) as exc:
+                eprint("Error: cannot create output directory %s: %s" % (args.output, exc))
+                return 1
 
     try:
-        eprint("Uploading: %s" % args.audio_file)
-        upload_url = upload_file(args.audio_file, base_url, args.api_key, args.timeout)
+        for audio_file in audio_files:
+            eprint("--- Processing: %s ---" % audio_file)
+            eprint("Uploading: %s" % audio_file)
+            upload_url = upload_file(audio_file, base_url, args.api_key)
 
-        eprint(
-            "Submitting transcription request with models: %s"
-            % ", ".join(args.models)
-        )
-        transcript_id = submit_transcription(
-            audio_url=upload_url,
-            base_url=base_url,
-            api_key=args.api_key,
-            speech_models=args.models,
-            speaker_labels=args.speaker_labels,
-            language_detection=args.language_detection,
-            timeout=args.timeout,
-        )
+            eprint(
+                "Submitting transcription request with models: %s"
+                % ", ".join(args.models)
+            )
+            transcript_id = submit_transcription(
+                audio_url=upload_url,
+                base_url=base_url,
+                api_key=args.api_key,
+                speech_models=args.models,
+                speaker_labels=args.speaker_labels,
+                language_detection=args.language_detection,
+            )
 
-        eprint("Transcript ID: %s" % transcript_id)
-        transcript = poll_transcript(
-            transcript_id=transcript_id,
-            base_url=base_url,
-            api_key=args.api_key,
-            poll_interval=args.poll_interval,
-            timeout=args.timeout,
-        )
+            eprint("Transcript ID: %s" % transcript_id)
+            transcript = poll_transcript(
+                transcript_id=transcript_id,
+                base_url=base_url,
+                api_key=args.api_key,
+                poll_interval=args.poll_interval,
+            )
 
-        output_text = format_transcript_output(transcript, args.speaker_labels)
-        write_output_text(output_text, args.output)
-        eprint("Wrote transcript to: %s" % args.output)
+            output_text = format_transcript_output(transcript, args.speaker_labels)
+            out_path = output_path(audio_file, args.output)
+            ensure_dir_for_file(out_path)
+            write_output_text(output_text, out_path)
+            eprint("Wrote transcript to: %s" % out_path)
 
         return 0
     except AssemblyAIError as exc:
