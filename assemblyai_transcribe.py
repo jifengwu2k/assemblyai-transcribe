@@ -77,6 +77,29 @@ def build_parser():
         help="Disable speaker diarization (enabled by default)",
     )
     parser.add_argument(
+        "--language",
+        action="append",
+        dest="languages",
+        metavar="LANG",
+        help=(
+            "Expected language as an ISO code, e.g. --language zh --language en "
+            "(a single flag may also hold a comma-separated list: --language zh,en). "
+            "One language forces that language; two or more restrict automatic "
+            "detection to them (the first is used as fallback). "
+            "Default: automatic detection across all languages"
+        ),
+    )
+    parser.add_argument(
+        "--code-switching",
+        dest="code_switching",
+        action="store_true",
+        default=False,
+        help=(
+            "Allow a single recording to mix the --language values "
+            "(requires at least two --language values)"
+        ),
+    )
+    parser.add_argument(
         "--no-language-detection",
         dest="language_detection",
         action="store_false",
@@ -103,11 +126,61 @@ def build_parser():
     return parser
 
 
+def normalize_languages(values):
+    # type: (Optional[List[str]]) -> List[str]
+    """Flatten repeated ``--language`` flags and comma-separated lists."""
+    languages = []  # type: List[str]
+    for value in values or []:
+        for part in value.split(","):
+            part = part.strip()
+            if part and part not in languages:
+                languages.append(part)
+    return languages
+
+
+def build_language_request(languages, language_detection, code_switching):
+    # type: (List[str], bool, bool) -> tuple
+    """Return the transcript request language fields plus a human description."""
+    if not languages:
+        fields = {"language_detection": language_detection}
+        if language_detection:
+            return fields, "automatic detection"
+        return fields, "automatic detection disabled"
+
+    if len(languages) == 1 and not code_switching:
+        fields = {"language_code": languages[0], "language_detection": False}
+        return fields, "forced to %s" % languages[0]
+
+    options = {
+        "expected_languages": list(languages),
+        "fallback_language": languages[0],
+    }
+    if code_switching:
+        options["code_switching"] = True
+    fields = {"language_detection": True, "language_detection_options": options}
+    description = "detection limited to %s" % ", ".join(languages)
+    if code_switching:
+        description += " with code switching"
+    return fields, description
+
+
 def parse_args(argv=None):
     # type: (Optional[List[str]]) -> argparse.Namespace
     parser = build_parser()
     args = parser.parse_args(argv)
     args.models = args.models or list(DEFAULT_SPEECH_MODELS)
+    args.languages = normalize_languages(args.languages)
+
+    if args.code_switching and len(args.languages) < 2:
+        parser.error(
+            "--code-switching requires at least two --language values "
+            "(e.g. --language zh --language en)"
+        )
+    if len(args.languages) > 1 and not args.language_detection:
+        parser.error(
+            "--no-language-detection cannot be combined with multiple "
+            "--language values"
+        )
     return args
 
 
@@ -221,15 +294,20 @@ def submit_transcription(
     speech_models,
     speaker_labels,
     language_detection,
+    languages=None,
+    code_switching=False,
     timeout=None,
 ):
-    # type: (str, str, str, List[str], bool, bool, Optional[float]) -> str
+    # type: (str, str, str, List[str], bool, bool, Optional[List[str]], bool, Optional[float]) -> str
+    language_fields, _ = build_language_request(
+        languages or [], language_detection, code_switching
+    )
     payload = {
         "audio_url": audio_url,
         "speech_models": speech_models,
-        "language_detection": language_detection,
         "speaker_labels": speaker_labels,
     }
+    payload.update(language_fields)
     data = make_json_request(
         "POST",
         "%s/v2/transcript" % base_url,
@@ -337,6 +415,10 @@ def run_transcribe(args):
                 "Submitting transcription request with models: %s"
                 % ", ".join(args.models)
             )
+            _, language_description = build_language_request(
+                args.languages, args.language_detection, args.code_switching
+            )
+            eprint("Language: %s" % language_description)
             transcript_id = submit_transcription(
                 audio_url=upload_url,
                 base_url=base_url,
@@ -344,6 +426,8 @@ def run_transcribe(args):
                 speech_models=args.models,
                 speaker_labels=args.speaker_labels,
                 language_detection=args.language_detection,
+                languages=args.languages,
+                code_switching=args.code_switching,
             )
 
             eprint("Transcript ID: %s" % transcript_id)
